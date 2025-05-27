@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stream Marauders</title>
+  <!-- Font Awesome for icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-p6V+0q2uE9oi8RvOyZlcmh4pQxJH5LXUuYp4GAM0+gXo8sGQ5x+fXkTbo6XSMkL+zF6YjKQm1K7PWQ2uAZ4Q3Q==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <style>
+    body { margin: 0; font-family: sans-serif; background: #0e1b2a; color: #fff; text-align: center; }
+    #sidebar { position: fixed; top: 0; left: 0; width: 60px; height: 100%; background: #11233f; display: flex; flex-direction: column; align-items: center; padding-top: 1rem; }
+    #sidebar button { background: none; border: none; color: #7ea0c4; width: 48px; height: 48px; margin: 0.5rem 0; cursor: pointer; position: relative; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+    #sidebar button.active, #sidebar button:hover { color: #fff; }
+    #sidebar button .tooltip { position: absolute; left: 60px; top: 50%; transform: translateY(-50%); background: #11233f; padding: 4px 8px; border-radius: 4px; white-space: nowrap; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity 0.2s; color: #fff; }
+    #sidebar button:hover .tooltip { opacity: 1; }
+    #main { margin-left: 60px; padding: 1rem; text-align: left; }
+    canvas { background: #11233f; display: block; margin: 1rem auto; border: 2px solid #1f3550; border-radius: 8px; }
+    #unitPalette { display: flex; justify-content: center; margin-top: 1rem; gap: 1rem; flex-wrap: wrap; }
+    #leaderboard { margin-top: 1rem; background: #22426f; padding: 1rem; width: 300px; border-radius: 8px; margin-left: auto; margin-right: auto; }
+    #status { margin: 1rem; padding: 0.5rem; background: #1f3550; border-radius: 4px; font-size: 14px; color: #c0d6e4; text-align: center; }
+    #gameTimer { position: fixed; top: 10px; right: 20px; background: #11233f; padding: 8px 12px; border-radius: 6px; font-family: monospace; box-shadow: 0 0 10px rgba(0,0,0,0.5); z-index:1000; }
+    #controls { margin: 1rem auto; background: #333; padding: 1rem; border-radius: 8px; display: none; width: 90%; max-width: 800px; }
+    #controls button { margin: 0.5rem; padding: 0.5rem 1rem; background: #9146ff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    #controls button:hover { background: #7c3aed; }
+    #chatLog { margin: 1rem auto; width: 90%; max-width: 800px; height: 150px; background: #1a1a1a; border: 1px solid #444; border-radius: 4px; padding: 0.5rem; overflow-y: auto; font-family: monospace; font-size: 12px; text-align: left; }
+    .chat-message { margin: 2px 0; padding: 2px; }
+    .moderator { color: #00ff00; }
+    .subscriber { color: #ffd700; }
+    .regular { color: #ffffff; }
+    .system { color: #ff6b6b; font-style: italic; }
+    .connection { color: #00bfff; font-weight: bold; }
+    #overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; flex-direction: column; z-index:10000; }
+    #overlay.hidden { display: none; }
+    .login-btn { display:inline-block; padding:1rem 2rem; margin:0.5rem; font-size:18px; background:#9146ff; color:#fff; text-decoration:none; border-radius:6px; }
+    #overlay h2, #overlay p { color:#fff; margin:0.5rem 0; }
+  </style>
+</head>
+<body>
+  <div id="sidebar">
+    <button id="btn-battle" class="active"><i class="fa fa-crosshairs"></i><span class="tooltip">Battle</span></button>
+    <button id="btn-army"><i class="fa fa-users"></i><span class="tooltip">Army</span></button>
+    <button id="btn-skins"><i class="fa fa-paint-brush"></i><span class="tooltip">Skins</span></button>
+    <button id="btn-quests"><i class="fa fa-scroll"></i><span class="tooltip">Quests</span></button>
+    <button id="btn-store"><i class="fa fa-shopping-cart"></i><span class="tooltip">Store</span></button>
+  </div>
+  <div id="overlay">
+    <h2>Login with Twitch</h2>
+    <a class="login-btn" id="login-btn" href="#"><i class="fa fa-sign-in-alt"></i> Login</a>
+    <div id="roleSelect" class="hidden">
+      <p>Select Role:</p>
+      <button data-role="captain" class="login-btn">Captain</button>
+      <button data-role="viewer" class="login-btn">Viewer</button>
+    </div>
+  </div>
+  <div id="main">
+    <h1>🎮 Stream Marauders</h1>
+    <div id="status">Not connected</div>
+    <div id="controls">
+      <button onclick="startGame()">▶️ Start Game</button>
+      <button onclick="clearBattlefield()">🗑️ Clear</button>
+      <button onclick="spawnTestPlayer()">👤 Test Player</button>
+    </div>
+    <canvas id="battlefield" width="800" height="400"></canvas>
+    <div id="unitPalette"></div>
+    <div id="leaderboard"><h2>🏆 Leaderboard</h2><ol id="scores"></ol></div>
+  </div>
+  <div id="gameTimer">🕒 00:00</div>
+  <div id="chatLog"></div>
+  <script>
+    // OAuth URL builder
+    const CLIENT_ID = '77moassa7h4rts518aong191fwn9r5';
+    const REDIRECT_URI = window.location.href;
+    const SCOPES = 'chat:read chat:edit';
+    const authURL = `https://id.twitch.tv/oauth2/authorize` +
+      `?client_id=${CLIENT_ID}` +
+      `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+      `&response_type=token` +
+      `&scope=${encodeURIComponent(SCOPES)}` +
+      `&force_verify=true`;
+    document.getElementById('login-btn').href = authURL;
+
+    // State
+    let accessToken = null, username = null, role = null;
+    function checkAuth() {
+      const hash = new URLSearchParams(window.location.hash.slice(1));
+      if (hash.get('access_token')) {
+        accessToken = hash.get('access_token');
+        window.history.replaceState({}, document.title, window.location.pathname);
+        fetch('https://api.twitch.tv/helix/users', {
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Client-ID': CLIENT_ID }
+        }).then(r => r.json()).then(d => {
+          username = d.data[0].login;
+          document.getElementById('login-btn').style.display = 'none';
+          document.getElementById('roleSelect').classList.remove('hidden');
+        });
+      }
+    }
+    checkAuth();
+
+    // Role selection
+    document.getElementById('roleSelect').querySelectorAll('button').forEach(b => b.onclick = () => {
+      role = b.dataset.role;
+      document.getElementById('overlay').classList.add('hidden');
+      document.getElementById('controls').style.display = 'block';
+      initTwitchIRC();
+      initGameSocket();
+      initGameLoop();
+    });
+
+    // Twitch IRC
+    let ircSocket;
+    function initTwitchIRC() {
+      updateStatus(`Connecting as ${username} (${role})...`);
+      ircSocket = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
+      ircSocket.onopen = () => {
+        ircSocket.send(`PASS oauth:${accessToken}`);
+        ircSocket.send(`NICK ${username}`);
+        ircSocket.send(`JOIN #${username}`);
+        updateStatus(`Connected to #${username}`);
+      };
+      ircSocket.onmessage = e => {
+        if (e.data.startsWith('PING')) ircSocket.send('PONG :tmi.twitch.tv');
+        else handleIRC(e.data);
+      };
+    }
+    function handleIRC(data) {
+      data.split('\r\n').forEach(line => {
+        if (!line) return;
+        if (line.includes('PRIVMSG')) parseChatLine(line);
+      });
+    }
+    function parseChatLine(line) {
+      const m = line.match(/:(\w+)!.*PRIVMSG #\w+ :(.+)/);
+      if (!m) return;
+      const user = m[1], msg = m[2];
+      const badgeMatch = line.match(/badges=([^;]*)/);
+      const badges = badgeMatch ? badgeMatch[1] : '';
+      const isSub = badges.includes('subscriber');
+      const isMod = badges.includes('moderator');
+      const isBroad = badges.includes('broadcaster');
+      const type = isBroad||isMod?'moderator':isSub?'subscriber':'regular';
+      logMessage(`${user}: ${msg}`, type);
+      handleCommand(user, msg.trim().toLowerCase(), isSub, isMod, isBroad);
+    }
+
+    // GameSocket
+    let gameSocket;
+    function initGameSocket() {
+      gameSocket = new WebSocket('wss://stream-marauders.vercel.app:8080');
+      gameSocket.onopen = () => logMessage('✅ Connected to game server','connection');
+      gameSocket.onmessage = e => {
+        const d = JSON.parse(e.data);
+        if (d.type==='attack') logMessage(`⚔️ ${d.user} used !attack!`,'system');
+      };
+    }
+
+    // Utils
+    function updateStatus(msg, err=false) {
+      const s = document.getElementById('status');
+      s.textContent = msg;
+      s.style.background = err ? '#8B0000' : '#1f3550';
+      s.style.color = err ? '#ffcccc' : '#c0d6e4';
+    }
+    function logMessage(msg, cls='system') {
+      const ch = document.getElementById('chatLog');
+      const d = document.createElement('div');
+      d.className = `chat-message ${cls}`;
+      d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      ch.appendChild(d);
+      ch.scrollTop = ch.scrollHeight;
+      if (ch.childElementCount > 100) ch.removeChild(ch.firstChild);
+    }
+
+    // Game Logic
+    const unitTypes = {
+      warrior: { name:'Warrior',emoji:'⚔️',hp:100,speed:2,damage:25,size:20,color:'#32CD32',range:30,attackSpeed:800,description:'Balanced melee fighter' },
+      tank:    { name:'Tank',   emoji:'🛡️',hp:200,speed:1,damage:15,size:30,color:'#FFD700',range:20,attackSpeed:1200,description:'Heavy damage sponge' },
+      archer:  { name:'Archer', emoji:'🏹',hp:80, speed:2.5,damage:20,size:18,color:'#228B22',range:120,attackSpeed:1000,description:'Ranged attacker, fragile but deadly' },
+      rogue:   { name:'Rogue',  emoji:'🗡️',hp:70, speed:3.5,damage:40,size:16,color:'#8B008B',range:25,attackSpeed:600,description:'Fast melee burst attacker' }
+    };
+    class Unit {
+      constructor(x,y,type,username='',unitClass='warrior',isSub=false,isMod=false) {
+        this.x=x; this.y=y; this.type=type; this.username=username; this.unitClass=unitClass;
+        if (type==='player') {
+          const base=unitTypes[unitClass]||unitTypes.warrior;
+          const modB = isMod?1.5:isSub?1.2:1;
+          this.hp = Math.floor(base.hp*modB);
+          this.maxHp=this.hp;
+          this.speed=base.speed;
+          this.damage=base.damage;
+          this.size=base.size;
+          this.color=base.color;
+          this.range=base.range;
+          this.attackSpeed = Math.max(300, base.attackSpeed - (isMod?200:isSub?100:0));
+          this.emoji=base.emoji;
+        } else {
+          this.hp=80; this.maxHp=this.hp; this.speed=1+Math.random()*0.8;
+          this.damage=15; this.size=18; this.color='red'; this.range=30; this.attackSpeed=800; this.emoji='👹';
+        }
+        this.target=null; this.lastAttack=0;
+      }
+      update(dt) {
+        if (this.hp<=0) return;
+        if (!this.target||this.target.hp<=0) this.acquireTarget();
+        if (this.target) {
+          const dx=this.target.x-this.x, dy=this.target.y-this.y;
+          const dist=Math.hypot(dx,dy);
+          if (dist>this.range) {
+            this.x += (dx/dist)*this.speed;
+            this.y += (dy/dist)*this.speed;
+          } else {
+            if (Date.now()-this.lastAttack>this.attackSpeed) {
+              this.target.hp -= this.damage;
+              this.lastAttack=Date.now();
+              if (this.target.type==='enemy' && this.target.hp<=0) killCounts[this.username] = (killCounts[this.username]||0)+1;
+            }
+          }
+        }
+      }
+      acquireTarget() {
+        const list = units.filter(u=>u.type!==this.type && u.hp>0);
+        if (list.length) this.target = list[Math.floor(Math.random()*list.length)];
+      }
+      draw() {
+        ctx.fillStyle=this.color;
+        ctx.beginPath();
+        ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
+        ctx.fill();
+        ctx.fillText(this.emoji,this.x- this.size/2,this.y+ this.size/2);
+        const hpW=(this.hp/this.maxHp)*(this.size*2);
+        ctx.fillStyle='black';ctx.fillRect(this.x-this.size,this.y-this.size-10,this.size*2,5);
+        ctx.fillStyle='lime';ctx.fillRect(this.x-this.size,this.y-this.size-10,hpW,5);
+      }
+    }
+    const canvas = document.getElementById('battlefield'), ctx = canvas.getContext('2d');
+    const units = [];
+    const killCounts = {};
+    let gameActive=false, spawnInterval, updateInterval, enemyInterval;
+    let wave=1;
+    function spawnPlayer(user,cls,isSub,isMod) {
+      const x=50,y=canvas.height/2+ (Math.random()-0.5)*200;
+      units.push(new Unit(x,y,'player',user,cls,isSub,isMod));
+      updateLeaderboard();
+    }
+    function spawnEnemy() {
+      const x=canvas.width-50, y=canvas.height/2+ (Math.random()-0.5)*200;
+      units.push(new Unit(x,y,'enemy'));
+      waveEnemies++;
+    }
+    function update(dt) {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      // grid
+      ctx.strokeStyle='#333';ctx.lineWidth=1;
+      for(let i=0;i<canvas.width;i+=50){ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,canvas.height);ctx.stroke();}
+      for(let i=0;i<canvas.height;i+=50){ctx.beginPath();ctx.moveTo(0,i);ctx.lineTo(canvas.width,i);ctx.stroke();}
+      units.forEach(u=>{u.update(dt);u.draw();});
+      units.filter(u=>u.hp>0);
+    }
+    function updateLeaderboard() {
+      const list=Object.entries(killCounts).sort((a,b)=>b[1]-a[1]);
+      const ol=document.getElementById('scores');ol.innerHTML='';
+      list.forEach(([u,c])=>{const li=document.createElement('li');li.textContent=`${u}: ${c}`;ol.appendChild(li);});
+    }
+    function createUnitPalette() {
+      const pal=document.getElementById('unitPalette'); pal.innerHTML='';
+      Object.keys(unitTypes).forEach(cls=>{
+        const u=unitTypes[cls];
+        const btn=document.createElement('button'); btn.innerHTML=`${u.emoji} ${u.name}`;
+        btn.onclick=()=>spawnPlayer('TestViewer',cls,false,false);
+        pal.appendChild(btn);
+      });
+    }
+    function startGame() {
+      if (gameActive) return; gameActive=true; wave=1; waveEnemies=0; killCounts={}; units.length=0; createUnitPalette();
+      spawnInterval = setInterval(spawnEnemy,5000);
+      updateInterval = setInterval(()=>update(16),16);
+      enemyInterval = setInterval(()=>{
+        if (waveEnemies>=wave*5) { wave++; waveEnemies=0; logMessage(`🚀 Wave ${wave} started`,'system'); }
+        if (wave>5) endGame();
+      },1000);
+      startTimer();
+    }
+    function clearBattlefield() {
+      clearInterval(spawnInterval);clearInterval(updateInterval);clearInterval(enemyInterval);clearTimer();gameActive=false;units.length=0;killCounts={};updateLeaderboard();
+    }
+    function spawnTestPlayer(){spawnPlayer('TestViewer','warrior',false,false);}
+    function startTimer(){
+      const start=Date.now();
+      document.getElementById('gameTimer').textContent='🕒 00:00';
+      gameTimer=setInterval(()=>{
+        const diff=Date.now()-start;const m=Math.floor(diff/60000),s=Math.floor((diff%60000)/1000);
+        document.getElementById('gameTimer').textContent=`🕒 ${(m<10?'0':'')+m}:${(s<10?'0':'')+s}`;
+        if (diff>=30*60000) { logMessage('⌛ Time up!','system'); endGame(); }
+      },1000);
+    }
+    function clearTimer(){ clearInterval(gameTimer); document.getElementById('gameTimer').textContent='🕒 00:00'; }
+    function endGame(){ clearInterval(spawnInterval);clearInterval(updateInterval);clearInterval(enemyInterval);clearTimer(); gameActive=false; logMessage('🏁 Game Over','system'); }
+    function handleCommand(u,c,isSub,isMod,isBroad){
+      const [cmd,arg]=c.split(' ');
+      if(cmd==='!join') spawnPlayer(u,arg||'warrior',isSub,isMod);
+      if(cmd==='!start'&&(isMod||isBroad)) startGame();
+      if(cmd==='!clear'&&(isMod||isBroad)) clearBattlefield();
+      if(cmd==='!units') logMessage(`Units: ${Object.values(unitTypes).map(x=>x.emoji+' '+x.name).join(', ')}`,'system');
+      if(cmd==='!stats') logMessage(`📊 ${u}: ${killCounts[u]||0} kills`,'system');
+      if(cmd==='!help') logMessage('Commands: !join [unit], !units, !start, !clear, !stats, !help','system');
+    }
+    function initGameLoop(){ createUnitPalette(); update(16); }
+  </script>
+</body>
+</html>
