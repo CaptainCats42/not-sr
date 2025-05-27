@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stream Marauders</title>
+  <!-- Font Awesome for icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-p6V+0q2uE9oi8RvOyZlcmh4pQxJH5LXUuYp4GAM0+gXo8sGQ5x+fXkTbo6XSMkL+zF6YjKQm1K7PWQ2uAZ4Q3Q==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <style>
+    /* Base styling */
+    body { margin: 0; font-family: sans-serif; background: #0e1b2a; color: #fff; }
+    /* Sidebar */
+    #sidebar { position: fixed; top: 0; left: 0; width: 60px; height: 100%; background: #11233f; display: flex; flex-direction: column; align-items: center; padding-top: 1rem; }
+    #sidebar button { background: none; border: none; color: #7ea0c4; width: 48px; height: 48px; margin: 0.5rem 0; cursor: pointer; position: relative; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+    #sidebar button.active, #sidebar button:hover { color: #fff; }
+    #sidebar button .tooltip { position: absolute; left: 60px; top: 50%; transform: translateY(-50%); background: #11233f; padding: 4px 8px; border-radius: 4px; white-space: nowrap; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity 0.2s; color: #fff; }
+    #sidebar button:hover .tooltip { opacity: 1; }
+    /* Main */
+    #main { margin-left: 60px; padding: 1rem; }
+    #main h1 { margin-top: 0; }
+    /* Canvas */
+    canvas { background: #11233f; display: block; margin: 1rem auto; border: 2px solid #1f3550; border-radius: 8px; }
+    #unitPalette { display: flex; justify-content: center; margin-top: 1rem; gap: 1rem; flex-wrap: wrap; }
+    /* Leaderboard, status, timer */
+    #leaderboard { margin-top: 1rem; background: #22426f; padding: 1rem; width: 300px; border-radius: 8px; }
+    #status { margin: 1rem 0; padding: 0.5rem; background: #1f3550; border-radius: 4px; font-size: 14px; color: #c0d6e4; }
+    #gameTimer { position: fixed; top: 10px; right: 20px; background: #11233f; padding: 8px 12px; border-radius: 6px; font-family: monospace; box-shadow: 0 0 10px rgba(0,0,0,0.5); }
+    /* Overlay login */
+    #overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; flex-direction: column; z-index:10000; }
+    #overlay.hidden { display: none; }
+    .login-btn { display:inline-block; padding:1rem 2rem; margin:0.5rem; font-size:18px; background:#9146ff; color:#fff; text-decoration:none; border-radius:6px; }
+    #overlay h2, #overlay p { color:#fff; margin:0.5rem 0; }
+  </style>
+</head>
+<body>
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <button id="btn-battle" class="active"><i class="fa fa-crosshairs"></i><span class="tooltip">Battle</span></button>
+    <button id="btn-army"><i class="fa fa-users"></i><span class="tooltip">Army</span></button>
+    <button id="btn-skins"><i class="fa fa-paint-brush"></i><span class="tooltip">Skins</span></button>
+    <button id="btn-quests"><i class="fa fa-scroll"></i><span class="tooltip">Quests</span></button>
+    <button id="btn-store"><i class="fa fa-shopping-cart"></i><span class="tooltip">Store</span></button>
+  </div>
+  <!-- Main -->
+  <div id="main">
+    <h1>🎮 Stream Marauders</h1>
+    <div id="status">Not connected</div>
+    <canvas id="battlefield" width="800" height="400"></canvas>
+    <div id="unitPalette"></div>
+    <div id="leaderboard"><h2>🏆 Leaderboard</h2><ol id="scores"></ol></div>
+  </div>
+  <div id="gameTimer">🕒 00:00</div>
+
+  <!-- Login overlay -->
+  <div id="overlay">
+    <h2>Login with Twitch</h2>
+    <a class="login-btn" id="login-btn" href="#">
+      <i class="fa fa-sign-in-alt"></i> Login
+    </a>
+    <div id="roleSelect" class="hidden">
+      <p>Select Role:</p>
+      <button data-role="captain" class="login-btn">Captain</button>
+      <button data-role="viewer" class="login-btn">Viewer</button>
+    </div>
+  </div>
+
+  <script>
+    // Build OAuth URL for login button
+    const CLIENT_ID = '77moassa7h4rts518aong191fwn9r5';
+    const REDIRECT_URI = window.location.href;
+    const SCOPES = 'chat:read chat:edit';
+    const authURL = `https://id.twitch.tv/oauth2/authorize`
+      + `?client_id=${CLIENT_ID}`
+      + `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`
+      + `&response_type=token`
+      + `&scope=${encodeURIComponent(SCOPES)}`
+      + `&force_verify=true`;
+    const loginBtn = document.getElementById('login-btn');
+    if (loginBtn) loginBtn.href = authURL;
+
+    // On load, parse OAuth token from URL hash
+    let accessToken = null, username = null, role = null;
+    function checkAuth() {
+      const hash = new URLSearchParams(window.location.hash.slice(1));
+      if (hash.get('access_token')) {
+        accessToken = hash.get('access_token');
+        window.history.replaceState({}, document.title, window.location.pathname);
+        fetch('https://api.twitch.tv/helix/users', {
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Client-ID': CLIENT_ID }
+        })
+          .then(r => r.json())
+          .then(d => {
+            username = d.data[0].login;
+            loginBtn.style.display = 'none';
+            document.getElementById('roleSelect').classList.remove('hidden');
+          });
+      }
+    }
+    checkAuth();
+
+    // Handle role selection
+    document.getElementById('roleSelect').querySelectorAll('button').forEach(b => b.onclick = () => {
+      role = b.dataset.role;
+      document.getElementById('overlay').classList.add('hidden');
+      initTwitch();
+    });
+
+    // Init Twitch IRC
+    let socket;
+    function initTwitch() {
+      document.getElementById('status').textContent = `Connecting as ${username} (${role}).`;
+      socket = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
+      socket.onopen = () => {
+        socket.send(`PASS oauth:${accessToken}`);
+        socket.send(`NICK ${username}`);
+        socket.send(`JOIN #${username}`);
+        document.getElementById('status').textContent = `Connected as ${username}`;
+      };
+      socket.onmessage = e => {
+        if (e.data.startsWith('PING')) socket.send('PONG :tmi.twitch.tv');
+        else parseChat(e.data);
+      };
+    }
+
+    // (Remaining game logic unchanged)
+  </script>
+</body>
+</html>
